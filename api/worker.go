@@ -1058,6 +1058,7 @@ type ethereumTypeAddressData struct {
 	totalResults         int
 	tokensBaseValue      float64
 	tokensSecondaryValue float64
+	stakingPools         []StakingPool
 }
 
 func (w *Worker) getEthereumTypeAddressBalances(addrDesc bchain.AddressDescriptor, details AccountDetails, filter *AddressFilter, secondaryCoin string) (*db.AddrBalance, *ethereumTypeAddressData, error) {
@@ -1157,7 +1158,39 @@ func (w *Worker) getEthereumTypeAddressBalances(addrDesc bchain.AddressDescripto
 		filter.Vout = AddressFilterVoutQueryNotNecessary
 		d.totalResults = -1
 	}
+	// if staking pool enabled, fetch the staking pool details
+	if details >= AccountDetailsTokenBalances {
+		d.stakingPools, err = w.getStakingPoolsData(addrDesc)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
 	return ba, &d, nil
+}
+
+func (w *Worker) getStakingPoolsData(addrDesc bchain.AddressDescriptor) ([]StakingPool, error) {
+	var pools []StakingPool
+	if len(w.chain.EthereumTypeGetSupportedStakingPools()) > 0 {
+		sp, err := w.chain.EthereumTypeGetStakingPoolsData(addrDesc)
+		if err != nil {
+			return nil, err
+		}
+		for i := range sp {
+			p := &sp[i]
+			pools = append(pools, StakingPool{
+				Contract:                p.Contract,
+				Name:                    p.Name,
+				PendingBalance:          (*Amount)(&p.PendingBalance),
+				PendingDepositedBalance: (*Amount)(&p.PendingDepositedBalance),
+				DepositedBalance:        (*Amount)(&p.DepositedBalance),
+				WithdrawTotalAmount:     (*Amount)(&p.WithdrawTotalAmount),
+				ClaimableAmount:         (*Amount)(&p.ClaimableAmount),
+				RestakedReward:          (*Amount)(&p.RestakedReward),
+				AutocompoundBalance:     (*Amount)(&p.AutocompoundBalance),
+			})
+		}
+	}
+	return pools, nil
 }
 
 func (w *Worker) txFromTxid(txid string, bestHeight uint32, option AccountDetails, blockInfo *db.BlockInfo, addresses map[string]struct{}) (*Tx, error) {
@@ -1401,6 +1434,7 @@ func (w *Worker) GetAddress(address string, page int, txsOnPage int, option Acco
 		ContractInfo:          ed.contractInfo,
 		Nonce:                 ed.nonce,
 		AddressAliases:        w.getAddressAliases(addresses),
+		StakingPools:          ed.stakingPools,
 	}
 	// keep address backward compatible, set deprecated Erc20Contract value if ERC20 token
 	if ed.contractInfo != nil && ed.contractInfo.Type == bchain.ERC20TokenType {
@@ -1893,7 +1927,11 @@ func (w *Worker) GetCurrentFiatRates(currencies []string, token string) (*FiatTi
 	ticker := w.fiatRates.GetCurrentTicker(vsCurrency, token)
 	var err error
 	if ticker == nil {
-		ticker, err = w.db.FiatRatesFindLastTicker(vsCurrency, token)
+		if token == "" {
+			// fallback - get last fiat rate from db if not in current ticker
+			// not for tokens, many tokens do not have fiat rates at all and it is very costly to do DB search for token without an exchange rate
+			ticker, err = w.db.FiatRatesFindLastTicker(vsCurrency, token)
+		}
 		if err != nil {
 			return nil, NewAPIError(fmt.Sprintf("Error finding ticker: %v", err), false)
 		} else if ticker == nil {
@@ -2375,6 +2413,7 @@ func (w *Worker) GetSystemInfo(internal bool) (*SystemInfo, error) {
 		CurrentFiatRatesTime:         nonZeroTime(currentFiatRatesTime),
 		HistoricalFiatRatesTime:      nonZeroTime(w.is.HistoricalFiatRatesTime),
 		HistoricalTokenFiatRatesTime: nonZeroTime(w.is.HistoricalTokenFiatRatesTime),
+		SupportedStakingPools:        w.chain.EthereumTypeGetSupportedStakingPools(),
 		DbSize:                       w.db.DatabaseSizeOnDisk(),
 		DbSizeFromColumns:            internalDBSize,
 		DbColumns:                    columnStats,
