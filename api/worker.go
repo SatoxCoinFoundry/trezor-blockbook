@@ -429,18 +429,25 @@ func (w *Worker) getTransactionFromBchainTx(bchainTx *bchain.Tx, height int, spe
 		// mempool txs do not have fees yet
 		if ethTxData.GasUsed != nil {
 			feesSat.Mul(ethTxData.GasPrice, ethTxData.GasUsed)
+			if ethTxData.L1Fee != nil {
+				feesSat.Add(&feesSat, ethTxData.L1Fee)
+			}
 		}
 		if len(bchainTx.Vout) > 0 {
 			valOutSat = bchainTx.Vout[0].ValueSat
 		}
 		ethSpecific = &EthereumSpecific{
-			GasLimit:   ethTxData.GasLimit,
-			GasPrice:   (*Amount)(ethTxData.GasPrice),
-			GasUsed:    ethTxData.GasUsed,
-			Nonce:      ethTxData.Nonce,
-			Status:     ethTxData.Status,
-			Data:       ethTxData.Data,
-			ParsedData: parsedInputData,
+			GasLimit:    ethTxData.GasLimit,
+			GasPrice:    (*Amount)(ethTxData.GasPrice),
+			GasUsed:     ethTxData.GasUsed,
+			L1Fee:       ethTxData.L1Fee,
+			L1FeeScalar: ethTxData.L1FeeScalar,
+			L1GasPrice:  (*Amount)(ethTxData.L1GasPrice),
+			L1GasUsed:   ethTxData.L1GasUsed,
+			Nonce:       ethTxData.Nonce,
+			Status:      ethTxData.Status,
+			Data:        ethTxData.Data,
+			ParsedData:  parsedInputData,
 		}
 		if internalData != nil {
 			ethSpecific.Type = internalData.Type
@@ -1650,6 +1657,17 @@ func (w *Worker) GetBalanceHistory(address string, fromTimestamp, toTimestamp in
 	if err != nil {
 		return nil, err
 	}
+	// do not get balance history for contracts
+	if w.chainType == bchain.ChainEthereumType {
+		ci, err := w.db.GetContractInfo(addrDesc, bchain.UnknownTokenType)
+		if err != nil {
+			return nil, err
+		}
+		if ci != nil {
+			glog.Info("GetBalanceHistory ", address, " is a contract, skipping")
+			return nil, NewAPIError("GetBalanceHistory for a contract not allowed", true)
+		}
+	}
 	fromUnix, fromHeight, toUnix, toHeight := w.balanceHistoryHeightsFromTo(fromTimestamp, toTimestamp)
 	if fromHeight >= toHeight {
 		return bhs, nil
@@ -2395,6 +2413,7 @@ func (w *Worker) GetSystemInfo(internal bool) (*SystemInfo, error) {
 	}
 	blockbookInfo := &BlockbookInfo{
 		Coin:                         w.is.Coin,
+		Network:                      w.is.GetNetwork(),
 		Host:                         w.is.Host,
 		Version:                      vi.Version,
 		GitCommit:                    vi.GitCommit,

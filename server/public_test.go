@@ -1039,7 +1039,7 @@ var websocketTestsBitcoinType = []websocketTest{
 		req: websocketReq{
 			Method: "getInfo",
 		},
-		want: `{"id":"0","data":{"name":"Fakecoin","shortcut":"FAKE","decimals":8,"version":"unknown","bestHeight":225494,"bestHash":"00000000eb0443fd7dc4a1ed5c686a8e995057805f9a161d9a5a77a95e72b7b6","block0Hash":"","testnet":true,"backend":{"version":"001001","subversion":"/Fakecoin:0.0.1/"}}}`,
+		want: `{"id":"0","data":{"name":"Fakecoin","shortcut":"FAKE","network":"FAKE","decimals":8,"version":"unknown","bestHeight":225494,"bestHash":"00000000eb0443fd7dc4a1ed5c686a8e995057805f9a161d9a5a77a95e72b7b6","block0Hash":"","testnet":true,"backend":{"version":"001001","subversion":"/Fakecoin:0.0.1/"}}}`,
 	},
 	{
 		name: "websocket getBlockHash",
@@ -1484,9 +1484,20 @@ var websocketTestsBitcoinType = []websocketTest{
 		},
 		want: `{"id":"43","data":{"P":0,"M":1,"zeroedKey":false,"blockFilter":""}}`,
 	},
+	{
+		name: "websocket rpcCall",
+		req: websocketReq{
+			Method: "rpcCall",
+			Params: WsRpcCallReq{
+				To:   "0x123",
+				Data: "0x456",
+			},
+		},
+		want: `{"id":"44","data":{"error":{"message":"not supported"}}}`,
+	},
 }
 
-func runWebsocketTestsBitcoinType(t *testing.T, ts *httptest.Server, tests []websocketTest) {
+func runWebsocketTests(t *testing.T, ts *httptest.Server, tests []websocketTest) {
 	url := strings.Replace(ts.URL, "http://", "ws://", 1) + "/websocket"
 	s, _, err := websocket.DefaultDialer.Dial(url, nil)
 	if err != nil {
@@ -1577,7 +1588,7 @@ func Test_PublicServer_BitcoinType(t *testing.T) {
 
 	httpTestsBitcoinType(t, ts)
 	socketioTestsBitcoinType(t, ts)
-	runWebsocketTestsBitcoinType(t, ts, websocketTestsBitcoinType)
+	runWebsocketTests(t, ts, websocketTestsBitcoinType)
 }
 
 func httpTestsBitcoinTypeExtendedIndex(t *testing.T, ts *httptest.Server) {
@@ -1681,7 +1692,7 @@ var websocketTestsBitcoinTypeExtendedIndex = []websocketTest{
 		req: websocketReq{
 			Method: "getInfo",
 		},
-		want: `{"id":"0","data":{"name":"Fakecoin","shortcut":"FAKE","decimals":8,"version":"unknown","bestHeight":225494,"bestHash":"00000000eb0443fd7dc4a1ed5c686a8e995057805f9a161d9a5a77a95e72b7b6","block0Hash":"","testnet":true,"backend":{"version":"001001","subversion":"/Fakecoin:0.0.1/"}}}`,
+		want: `{"id":"0","data":{"name":"Fakecoin","shortcut":"FAKE","network":"FAKE","decimals":8,"version":"unknown","bestHeight":225494,"bestHash":"00000000eb0443fd7dc4a1ed5c686a8e995057805f9a161d9a5a77a95e72b7b6","block0Hash":"","testnet":true,"backend":{"version":"001001","subversion":"/Fakecoin:0.0.1/"}}}`,
 	},
 	{
 		name: "websocket getBlockHash",
@@ -1758,5 +1769,5 @@ func Test_PublicServer_BitcoinType_ExtendedIndex(t *testing.T) {
 	defer ts.Close()
 
 	httpTestsBitcoinTypeExtendedIndex(t, ts)
-	runWebsocketTestsBitcoinType(t, ts, websocketTestsBitcoinTypeExtendedIndex)
+	runWebsocketTests(t, ts, websocketTestsBitcoinTypeExtendedIndex)
 }

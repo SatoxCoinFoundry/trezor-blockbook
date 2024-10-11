@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"math/big"
 	"net/http"
 	"strconv"
@@ -30,8 +30,6 @@ type Network uint32
 const (
 	// MainNet is production network
 	MainNet Network = 1
-	// TestNetGoerli is Goerli test network
-	TestNetGoerli Network = 5
 	// TestNetSepolia is Sepolia test network
 	TestNetSepolia Network = 11155111
 	// TestNetHolesky is Holesky test network
@@ -109,17 +107,22 @@ func NewEthereumRPC(config json.RawMessage, pushHandler func(bchain.Notification
 	return s, nil
 }
 
+// OpenRPC opens RPC connection to ETH backend
+var OpenRPC = func(url string) (bchain.EVMRPCClient, bchain.EVMClient, error) {
+	opts := []rpc.ClientOption{}
+	opts = append(opts, rpc.WithWebsocketMessageSizeLimit(0))
+	r, err := rpc.DialOptions(context.Background(), url, opts...)
+	if err != nil {
+		return nil, nil, err
+	}
+	rc := &EthereumRPCClient{Client: r}
+	ec := &EthereumClient{Client: ethclient.NewClient(r)}
+	return rc, ec, nil
+}
+
 // Initialize initializes ethereum rpc interface
 func (b *EthereumRPC) Initialize() error {
-	b.OpenRPC = func(url string) (bchain.EVMRPCClient, bchain.EVMClient, error) {
-		r, err := rpc.Dial(url)
-		if err != nil {
-			return nil, nil, err
-		}
-		rc := &EthereumRPCClient{Client: r}
-		ec := &EthereumClient{Client: ethclient.NewClient(r)}
-		return rc, ec, nil
-	}
+	b.OpenRPC = OpenRPC
 
 	rc, ec, err := b.OpenRPC(b.ChainConfig.RPCURL)
 	if err != nil {
@@ -146,9 +149,6 @@ func (b *EthereumRPC) Initialize() error {
 	case MainNet:
 		b.Testnet = false
 		b.Network = "livenet"
-	case TestNetGoerli:
-		b.Testnet = true
-		b.Network = "goerli"
 	case TestNetSepolia:
 		b.Testnet = true
 		b.Network = "sepolia"
@@ -184,11 +184,19 @@ func (b *EthereumRPC) InitializeMempool(addrDescForOutpoint bchain.AddrDescForOu
 		return errors.New("Mempool not created")
 	}
 
+	var err error
+	var txs []string
 	// get initial mempool transactions
-	txs, err := b.GetMempoolTransactions()
-	if err != nil {
-		return err
+	// workaround for an occasional `decoding block` error from getBlockRaw - try 3 times with a delay and then proceed
+	for i := 0; i < 3; i++ {
+		txs, err = b.GetMempoolTransactions()
+		if err == nil {
+			break
+		}
+		glog.Error("GetMempoolTransaction ", err)
+		time.Sleep(time.Second * 5)
 	}
+
 	for _, txid := range txs {
 		b.Mempool.AddTransactionToMempool(txid)
 	}
@@ -369,7 +377,7 @@ func (b *EthereumRPC) getConsensusVersion() string {
 		glog.Error("getConsensusVersion ", err)
 		return ""
 	}
-	body, err := ioutil.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		glog.Error("getConsensusVersion ", err)
 		return ""
@@ -615,6 +623,9 @@ func (b *EthereumRPC) getCreationContractInfo(contract string, height uint32) *b
 
 func (b *EthereumRPC) processCallTrace(call *rpcCallTrace, d *bchain.EthereumInternalData, contracts []bchain.ContractInfo, blockHeight uint32) []bchain.ContractInfo {
 	value, err := hexutil.DecodeBig(call.Value)
+	if err != nil {
+		value = new(big.Int)
+	}
 	if call.Type == "CREATE" || call.Type == "CREATE2" {
 		d.Transfers = append(d.Transfers, bchain.EthereumInternalTransfer{
 			Type:  bchain.CREATE,
@@ -826,12 +837,13 @@ func (b *EthereumRPC) GetTransactionForMempool(txid string) (*bchain.Tx, error) 
 func (b *EthereumRPC) GetTransaction(txid string) (*bchain.Tx, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), b.Timeout)
 	defer cancel()
-	var tx *bchain.RpcTransaction
+	tx := &bchain.RpcTransaction{}
 	hash := ethcommon.HexToHash(txid)
-	err := b.RPC.CallContext(ctx, &tx, "eth_getTransactionByHash", hash)
+	err := b.RPC.CallContext(ctx, tx, "eth_getTransactionByHash", hash)
 	if err != nil {
 		return nil, err
-	} else if tx == nil {
+	}
+	if *tx == (bchain.RpcTransaction{}) {
 		if b.mempoolInitialized {
 			b.Mempool.RemoveTransactionFromMempool(txid)
 		}
